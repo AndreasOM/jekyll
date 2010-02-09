@@ -1,4 +1,17 @@
+
 h1. Jekyll
+
+h2. Anti
+
+This is my personal fork.
+
+Please don't use it.
+I'll try to push usefull stuff upstream.
+
+This might seriously break your system!
+
+
+h2. Original
 
 By Tom Preston-Werner, Nick Quaranto, and many awesome contributors!
 
