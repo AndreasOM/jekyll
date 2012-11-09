@@ -22,6 +22,8 @@ module Jekyll
     attr_accessor :data, :content, :output, :ext
     attr_accessor :date, :slug, :published, :tags, :categories
 
+    attr_reader :name
+
     # Initialize this Post instance.
     #   +site+ is the Site
     #   +base+ is the String path to the dir containing the post file
@@ -78,6 +80,8 @@ module Jekyll
       self.date = Time.parse(date)
       self.slug = slug
       self.ext = ext
+    rescue ArgumentError
+      raise FatalException.new("Post #{name} does not have a valid date.")
     end
 
     # The generated directory into which the post will be placed
@@ -117,20 +121,29 @@ module Jekyll
     #
     # Returns <String>
     def url
-      return permalink if permalink
+      return @url if @url
 
-      @url ||= {
-        "year"       => date.strftime("%Y"),
-        "month"      => date.strftime("%m"),
-        "day"        => date.strftime("%d"),
-        "title"      => CGI.escape(slug),
-        "i_day"      => date.strftime("%d").to_i.to_s,
-        "i_month"    => date.strftime("%m").to_i.to_s,
-        "categories" => categories.join('/'),
-        "output_ext" => self.output_ext
-      }.inject(template) { |result, token|
-        result.gsub(/:#{Regexp.escape token.first}/, token.last)
-      }.gsub(/\/\//, "/")
+      url = if permalink
+        permalink
+      else
+        {
+          "year"       => date.strftime("%Y"),
+          "month"      => date.strftime("%m"),
+          "day"        => date.strftime("%d"),
+          "title"      => CGI.escape(slug),
+          "i_day"      => date.strftime("%d").to_i.to_s,
+          "i_month"    => date.strftime("%m").to_i.to_s,
+          "categories" => categories.map { |c| URI.escape(c) }.join('/'),
+          "output_ext" => self.output_ext
+        }.inject(template) { |result, token|
+          result.gsub(/:#{Regexp.escape token.first}/, token.last)
+        }.gsub(/\/\//, "/")
+      end
+
+      # sanitize url
+      @url = url.split('/').reject{ |part| part =~ /^\.+$/ }.join('/')
+      @url += "/" if url =~ /\/$/
+      @url
     end
 
     # The UID for this post (useful in feeds)
@@ -177,22 +190,25 @@ module Jekyll
 
       do_layout(payload, layouts)
     end
+    
+    # Obtain destination path.
+    #   +dest+ is the String path to the destination dir
+    #
+    # Returns destination file path.
+    def destination(dest)
+      # The url needs to be unescaped in order to preserve the correct filename
+      path = File.join(dest, CGI.unescape(self.url))
+      path = File.join(path, "index.html") if template[/\.html$/].nil?
+      path
+    end
 
     # Write the generated post file to the destination directory.
     #   +dest+ is the String path to the destination dir
     #
     # Returns nothing
     def write(dest)
-      FileUtils.mkdir_p(File.join(dest, dir))
-
-      # The url needs to be unescaped in order to preserve the correct filename
-      path = File.join(dest, CGI.unescape(self.url))
-
-      if template[/\.html$/].nil?
-        FileUtils.mkdir_p(path)
-        path = File.join(path, "index.html")
-      end
-
+      path = destination(dest)
+      FileUtils.mkdir_p(File.dirname(path))
       File.open(path, 'w') do |f|
         f.write(self.output)
       end
