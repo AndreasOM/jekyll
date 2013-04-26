@@ -1,7 +1,6 @@
 require 'uri'
 
 module Jekyll
-
   module Filters
     # Convert a Textile string into HTML output.
     #
@@ -10,7 +9,7 @@ module Jekyll
     # Returns the HTML formatted String.
     def textilize(input)
       site = @context.registers[:site]
-      converter = site.getConverterImpl(Jekyll::TextileConverter)
+      converter = site.getConverterImpl(Jekyll::Converters::Textile)
       converter.convert(input)
     end
 
@@ -21,7 +20,7 @@ module Jekyll
     # Returns the HTML formatted String.
     def markdownify(input)
       site = @context.registers[:site]
-      converter = site.getConverterImpl(Jekyll::MarkdownConverter)
+      converter = site.getConverterImpl(Jekyll::Converters::Markdown)
       converter.convert(input)
     end
 
@@ -57,6 +56,31 @@ module Jekyll
       date.xmlschema
     end
 
+    # Format a date according to RFC-822
+    #
+    # date - The Time to format.
+    #
+    # Examples
+    #
+    #   date_to_rfc822(Time.now)
+    #   # => "Sun, 24 Apr 2011 12:34:46 +0000"
+    #
+    # Returns the formatted String.
+    def date_to_rfc822(date)
+      date.rfc822
+    end
+
+    # XML escape a string for use. Replaces any special characters with
+    # appropriate HTML entity replacements.
+    #
+    # input - The String to escape.
+    #
+    # Examples
+    #
+    #   xml_escape('foo "bar" <baz>')
+    #   # => "foo &quot;bar&quot; &lt;baz&gt;"
+    #
+    # Returns the escaped String.
     def xml_escape(input)
       CGI.escapeHTML(input)
     end
@@ -113,6 +137,5 @@ module Jekyll
         "#{array[0...-1].join(', ')}, #{connector} #{array[-1]}"
       end
     end
-
   end
 end

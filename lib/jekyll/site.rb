@@ -1,11 +1,11 @@
 require 'set'
 
 module Jekyll
-
   class Site
     attr_accessor :config, :layouts, :posts, :pages, :static_files,
                   :categories, :exclude, :include, :source, :dest, :lsi, :pygments,
-                  :permalink_style, :tags, :time, :future, :safe, :plugins, :limit_posts
+                  :permalink_style, :tags, :time, :future, :safe, :plugins, :limit_posts,
+                  :show_drafts, :keep_files, :baseurl
 
     attr_accessor :converters, :generators
 
@@ -18,14 +18,17 @@ module Jekyll
       self.safe            = config['safe']
       self.source          = File.expand_path(config['source'])
       self.dest            = File.expand_path(config['destination'])
-      self.plugins         = Array(config['plugins']).map { |d| File.expand_path(d) }
+      self.plugins         = plugins_path
       self.lsi             = config['lsi']
       self.pygments        = config['pygments']
+      self.baseurl         = config['baseurl']
       self.permalink_style = config['permalink'].to_sym
-      self.exclude         = config['exclude'] || []
-      self.include         = config['include'] || []
+      self.exclude         = config['exclude']
+      self.include         = config['include']
       self.future          = config['future']
-      self.limit_posts     = config['limit_posts'] || nil
+      self.show_drafts     = config['show_drafts']
+      self.limit_posts     = config['limit_posts']
+      self.keep_files      = config['keep_files']
 
       self.reset
       self.setup
@@ -70,6 +73,12 @@ module Jekyll
     def setup
       require 'classifier' if self.lsi
 
+      # Check that the destination dir isn't the source dir or a directory
+      # parent to the source dir.
+      if self.source =~ /^#{self.dest}/
+        raise FatalException.new "Destination directory cannot be or contain the Source directory."
+      end
+
       # If safe mode is off, load in any Ruby files under the plugins
       # directory.
       unless self.safe
@@ -80,16 +89,18 @@ module Jekyll
         end
       end
 
-      self.converters = Jekyll::Converter.subclasses.select do |c|
-        !self.safe || c.safe
-      end.map do |c|
-        c.new(self.config)
-      end
+      self.converters = instantiate_subclasses(Jekyll::Converter)
+      self.generators = instantiate_subclasses(Jekyll::Generator)
+    end
 
-      self.generators = Jekyll::Generator.subclasses.select do |c|
-        !self.safe || c.safe
-      end.map do |c|
-        c.new(self.config)
+    # Internal: Setup the plugin search path
+    #
+    # Returns an Array of plugin search paths
+    def plugins_path
+      if (config['plugins'] == Jekyll::Configuration::DEFAULTS['plugins'])
+        [File.join(self.source, config['plugins'])]
+      else
+        Array(config['plugins']).map { |d| File.expand_path(d) }
       end
     end
 
@@ -130,13 +141,25 @@ module Jekyll
 
       self.read_posts(dir)
 
+      if self.show_drafts
+        self.read_drafts(dir)
+      end
+
+      self.posts.sort!
+
+      # limit the posts if :limit_posts option is set
+      if limit_posts
+        limit = self.posts.length < limit_posts ? self.posts.length : limit_posts
+        self.posts = self.posts[-limit, limit]
+      end
+
       entries.each do |f|
         f_abs = File.join(base, f)
         f_rel = File.join(dir, f)
         if File.directory?(f_abs)
           next if self.dest.sub(/\/$/, '') == f_abs
           read_directories(f_rel)
-        elsif !File.symlink?(f_abs)
+        else
           first3 = File.open(f_abs) { |fd| fd.read(3) }
           if first3 == "---"
             # file appears to have a YAML header so process it as a page
@@ -156,9 +179,7 @@ module Jekyll
     #
     # Returns nothing.
     def read_posts(dir)
-      base = File.join(self.source, dir, '_posts')
-      return unless File.exists?(base)
-      entries = Dir.chdir(base) { filter_entries(Dir['**/*']) }
+      entries = get_entries(dir, '_posts')
 
       # first pass processes, but does not yet render post content
       entries.each do |f|
@@ -166,19 +187,28 @@ module Jekyll
           post = Post.new(self, self.source, dir, f)
 
           if post.published && (self.future || post.date <= self.time)
-            self.posts << post
-            post.categories.each { |c| self.categories[c] << post }
-            post.tags.each { |c| self.tags[c] << post }
+            aggregate_post_info(post)
           end
         end
       end
+    end
 
-      self.posts.sort!
+    # Read all the files in <source>/<dir>/_drafts and create a new Post
+    # object with each one.
+    #
+    # dir - The String relative path of the directory to read.
+    #
+    # Returns nothing.
+    def read_drafts(dir)
+      entries = get_entries(dir, '_drafts')
 
-      # limit the posts if :limit_posts option is set
-      if limit_posts
-        limit = self.posts.length < limit_posts ? self.posts.length : limit_posts
-        self.posts = self.posts[-limit, limit]
+      # first pass processes, but does not yet render draft content
+      entries.each do |f|
+        if Draft.valid?(f)
+          draft = Draft.new(self, self.source, dir, f)
+
+          aggregate_post_info(draft)
+        end
       end
     end
 
@@ -217,7 +247,11 @@ module Jekyll
       # all files and directories in destination, including hidden ones
       dest_files = Set.new
       Dir.glob(File.join(self.dest, "**", "*"), File::FNM_DOTMATCH) do |file|
-        dest_files << file unless file =~ /\/\.{1,2}$/
+        if self.keep_files.length > 0
+          dest_files << file unless file =~ /\/\.{1,2}$/ || file =~ keep_file_regex
+        else
+          dest_files << file unless file =~ /\/\.{1,2}$/
+        end
       end
 
       # files to be written
@@ -238,8 +272,19 @@ module Jekyll
       files.merge(dirs)
 
       obsolete_files = dest_files - files
-
       FileUtils.rm_rf(obsolete_files.to_a)
+    end
+
+    # Private: creates a regular expression from the keep_files array
+    #
+    # Examples
+    #   ['.git','.svn'] creates the following regex: /\/(\.git|\/.svn)/
+    #
+    # Returns the regular expression
+    def keep_file_regex
+      or_list = self.keep_files.join("|")
+      pattern = "\/(#{or_list.gsub(".", "\.")})"
+      Regexp.new pattern
     end
 
     # Write static files, pages, and posts.
@@ -311,12 +356,12 @@ module Jekyll
     #
     # Returns the Array of filtered entries.
     def filter_entries(entries)
-      entries = entries.reject do |e|
-        unless self.include.include?(e)
+      entries.reject do |e|
+        unless self.include.glob_include?(e)
           ['.', '_', '#'].include?(e[0..0]) ||
           e[-1..-1] == '~' ||
-          self.exclude.include?(e) ||
-          File.symlink?(e)
+          self.exclude.glob_include?(e) ||
+          (File.symlink?(e) && self.safe)
         end
       end
     end
@@ -333,6 +378,45 @@ module Jekyll
       else
         raise "Converter implementation not found for #{klass}"
       end
+    end
+
+    # Create array of instances of the subclasses of the class or module
+    #   passed in as argument.
+    #
+    # klass - class or module containing the subclasses which should be
+    #         instantiated
+    #
+    # Returns array of instances of subclasses of parameter
+    def instantiate_subclasses(klass)
+      klass.subclasses.select do |c|
+        !self.safe || c.safe
+      end.sort.map do |c|
+        c.new(self.config)
+      end
+    end
+
+    # Read the entries from a particular directory for processing
+    #
+    # dir - The String relative path of the directory to read
+    # subfolder - The String directory to read
+    #
+    # Returns the list of entries to process
+    def get_entries(dir, subfolder)
+      base = File.join(self.source, dir, subfolder)
+      return [] unless File.exists?(base)
+      entries = Dir.chdir(base) { filter_entries(Dir['**/*']) }
+      entries.delete_if { |e| File.directory?(File.join(base, e)) }
+    end
+
+    # Aggregate post information
+    #
+    # post - The Post object to aggregate information for
+    #
+    # Returns nothing
+    def aggregate_post_info(post)
+      self.posts << post
+      post.categories.each { |c| self.categories[c] << post }
+      post.tags.each { |c| self.tags[c] << post }
     end
   end
 end

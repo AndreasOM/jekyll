@@ -5,7 +5,7 @@ class TestGeneratedSite < Test::Unit::TestCase
     setup do
       clear_dest
       stub(Jekyll).configuration do
-        Jekyll::DEFAULTS.merge({'source' => source_dir, 'destination' => dest_dir})
+        Jekyll::Configuration::DEFAULTS.merge({'source' => source_dir, 'destination' => dest_dir})
       end
 
       @site = Site.new(Jekyll.configuration)
@@ -14,7 +14,7 @@ class TestGeneratedSite < Test::Unit::TestCase
     end
 
     should "ensure post count is as expected" do
-      assert_equal 28, @site.posts.size
+      assert_equal 32, @site.posts.size
     end
 
     should "insert site.posts into the index" do
@@ -46,7 +46,7 @@ class TestGeneratedSite < Test::Unit::TestCase
     setup do
       clear_dest
       stub(Jekyll).configuration do
-        Jekyll::DEFAULTS.merge({'source' => source_dir, 'destination' => dest_dir, 'limit_posts' => 5})
+        Jekyll::Configuration::DEFAULTS.merge({'source' => source_dir, 'destination' => dest_dir, 'limit_posts' => 5})
       end
 
       @site = Site.new(Jekyll.configuration)
@@ -62,7 +62,7 @@ class TestGeneratedSite < Test::Unit::TestCase
       assert_raise ArgumentError do
         clear_dest
         stub(Jekyll).configuration do
-          Jekyll::DEFAULTS.merge({'source' => source_dir, 'destination' => dest_dir, 'limit_posts' => 0})
+          Jekyll::Configuration::DEFAULTS.merge({'source' => source_dir, 'destination' => dest_dir, 'limit_posts' => 0})
         end
 
         @site = Site.new(Jekyll.configuration)

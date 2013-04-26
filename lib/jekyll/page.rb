@@ -1,5 +1,4 @@
 module Jekyll
-
   class Page
     include Convertible
 
@@ -45,10 +44,16 @@ module Jekyll
     #
     # Returns the template String.
     def template
-      if self.site.permalink_style == :pretty && !index? && html?
-        "/:basename/"
+      if self.site.permalink_style == :pretty
+        if index? && html?
+          "/:path/"
+        elsif html?
+          "/:path/:basename/"
+        else
+          "/:path/:basename:output_ext"
+        end
       else
-        "/:basename:output_ext"
+        "/:path/:basename:output_ext"
       end
     end
 
@@ -62,6 +67,7 @@ module Jekyll
         permalink
       else
         {
+          "path"       => @dir,
           "basename"   => self.basename,
           "output_ext" => self.output_ext,
         }.inject(template) { |result, token|
@@ -105,8 +111,9 @@ module Jekyll
     # Returns the Hash representation of this Page.
     def to_liquid
       self.data.deep_merge({
-        "url"        => File.join(@dir, self.url),
-        "content"    => self.content })
+        "url"        => self.url,
+        "content"    => self.content,
+        "path"       => self.data['path'] || File.join(@dir, @name).sub(/\A\//, '') })
     end
 
     # Obtain destination path.
@@ -117,22 +124,9 @@ module Jekyll
     def destination(dest)
       # The url needs to be unescaped in order to preserve the correct
       # filename.
-      path = File.join(dest, @dir, CGI.unescape(self.url))
+      path = File.join(dest, CGI.unescape(self.url))
       path = File.join(path, "index.html") if self.url =~ /\/$/
       path
-    end
-
-    # Write the generated page file to the destination directory.
-    #
-    # dest - The String path to the destination dir.
-    #
-    # Returns nothing.
-    def write(dest)
-      path = destination(dest)
-      FileUtils.mkdir_p(File.dirname(path))
-      File.open(path, 'w') do |f|
-        f.write(self.output)
-      end
     end
 
     # Returns the object as a debug String.
@@ -149,7 +143,5 @@ module Jekyll
     def index?
       basename == 'index'
     end
-
   end
-
 end
